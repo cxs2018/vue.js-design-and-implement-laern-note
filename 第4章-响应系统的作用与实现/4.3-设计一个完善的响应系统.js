@@ -1,11 +1,24 @@
 let activeEffect;
 
-function effect(fn) {
-  activeEffect = fn;
-  fn();
+function cleanup(effectFn) {
+  for (let i = 0; i < effectFn.deps.length; i++) {
+    const deps = effectFn.deps[i];
+    deps.delete(effectFn);
+  }
+  effectFn.deps.length = 0;
 }
 
-const data = { text: "Hello, world!" };
+function effect(fn) {
+  const effectFn = () => {
+    cleanup(effectFn);
+    activeEffect = effectFn;
+    fn();
+  };
+  effectFn.deps = [];
+  effectFn();
+}
+
+const data = { ok: true, text: "Hello, world!" };
 
 const bucket = new WeakMap();
 
@@ -20,13 +33,15 @@ function track(target, key) {
     depsMap.set(key, (deps = new Set()));
   }
   deps.add(activeEffect);
+  activeEffect.deps.push(deps);
 }
 
 function trigger(target, key) {
   const depsMap = bucket.get(target);
   if (!depsMap) return;
   const effects = depsMap.get(key);
-  effects && effects.forEach((fn) => fn());
+  const effectsToRun = new Set(effects);
+  effectsToRun.forEach((effectFn) => effectFn());
 }
 
 const obj = new Proxy(data, {
@@ -42,7 +57,23 @@ const obj = new Proxy(data, {
 });
 
 effect(() => {
-  console.log("我读取了响应式数据data.text: ", obj.text);
+  console.log("我读取了响应式数据data.text: ", obj.ok ? obj.text : "not");
 });
 
-obj.text = "你好，世界！";
+setTimeout(() => {
+  obj.text = "你好，世界！";
+}, 1000);
+
+setTimeout(() => {
+  obj.ok = false;
+}, 2000);
+
+setTimeout(() => {
+  obj.text = "1111";
+}, 3000);
+
+setTimeout(() => {
+  obj.ok = true;
+}, 4000);
+
+console.log(bucket);
