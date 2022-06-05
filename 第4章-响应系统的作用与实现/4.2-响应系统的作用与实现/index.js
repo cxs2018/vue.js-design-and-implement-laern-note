@@ -2,7 +2,7 @@
  * @Description:
  * @Author: cuixuesen
  * @Date: 2022-06-05 17:40:09
- * @LastEditTime: 2022-06-05 17:58:35
+ * @LastEditTime: 2022-06-05 20:40:43
  * @LastEditors: your name
  */
 console.log("4.2===========111");
@@ -46,3 +46,5 @@ effect();
 setTimeout(() => {
   obj.text = "hello vue3";
 }, 1000);
+
+// 缺陷，硬编码，effect函数名
