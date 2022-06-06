@@ -2,26 +2,41 @@
  * @Description:
  * @Author: cuixuesen
  * @Date: 2022-06-05 20:59:07
- * @LastEditTime: 2022-06-05 22:36:14
+ * @LastEditTime: 2022-06-06 21:40:17
  * @LastEditors: your name
  */
-console.log("4.3=============index2");
+console.log("4.6=============index");
 
 // 存储副作用函数的桶
 const bucket = new WeakMap();
 
-const data = { text: "hello world" };
+// 原始数据
+const data = { foo: 1 };
 
 // 用一个全局变量存储被注册的副作用函数
 let activeEffect;
+// effect栈
+const effectStack = [];
 // effect函数用于注册副作用函数
 function effect(fn) {
-  // 当调用effect注册副作用函数时，将副作用函数fn赋值给activeEffect
-  activeEffect = fn;
-  // 执行副作用函数
-  fn();
+  const effectFn = () => {
+    // 调用cleanup函数完成清除工作
+    cleanup(effectFn);
+    // 当effectFn执行时，将其设置为当前激活的副作用函数
+    activeEffect = effectFn;
+    // 在调用副作用按时之前将当副作用函数压入栈中
+    effectStack.push(effectFn);
+    fn();
+    // 在当前副作用函数执行完毕后，将当前副作用函数弹出栈，并把activeEffect还原为之前的值
+    effectStack.pop();
+    activeEffect = effectStack[effectStack.length - 1];
+  };
+  // activeEffect.deps用来存储所有与该副作用函数相关联的依赖集合
+  effectFn.deps = [];
+  effectFn();
 }
 
+// 代理对象
 const obj = new Proxy(data, {
   // 拦截读取操作
   get(target, key) {
@@ -57,6 +72,9 @@ function track(target, key) {
   }
   // 最后将当前激活的副作用函数添加到“桶”里
   deps.add(activeEffect);
+  // deps就是一个与当前副作用函数存在联系的依赖集合
+  // 将其添加到activeEffect.deps数组中
+  activeEffect.deps.push(deps);
 }
 
 // 在set拦截函数内调用trigger函数触发变化
@@ -66,31 +84,35 @@ function trigger(target, key) {
   if (!depsMap) return;
   // 根据key取得所有副作用函数effects
   const effects = depsMap.get(key);
+
+  // 避免无限循环，使用新的set集合
+  const effectsToRun = new Set();
+
+  effects &&
+    effects.forEach((effectFn) => {
+      // 如果trigger触发执行的副作用函数与当前正在执行的副作用函数相同，则不触发执行
+      if (effectFn !== activeEffect) {
+        effectsToRun.add(effectFn);
+      }
+    });
   // 执行副作用函数
-  effects && effects.forEach((fn) => fn());
+  effectsToRun.forEach((effectFn) => effectFn());
+}
+
+function cleanup(effectFn) {
+  // 遍历effectFn.deps数组
+  for (let i = 0; i < effectFn.deps.length; i++) {
+    // deps是依赖集合
+    const deps = effectFn.deps[i];
+    // 将effectFn从依赖集合中移除
+    deps.delete(effectFn);
+  }
+  // 最后需要重置effectFn.deps数组
+  effectFn.deps.length = 0;
 }
 
 effect(() => {
-  document.body.innerText = obj.text + obj.newText;
+  // document.body.innerText = obj.foo;
+  console.log("111111");
+  obj.foo++;
 });
-
-setTimeout(() => {
-  obj.text = "hello cxs";
-  obj.newText = "timi";
-}, 1000);
-
-console.log(bucket, data, obj);
-
-// map 和 weakMap
-const map = new Map();
-const weakMap = new WeakMap();
-
-(function () {
-  const foo = { foo: 1 };
-  const bar = { bar: 2 };
-
-  map.set(foo, 1);
-  weakMap.set(bar, 2);
-})();
-
-console.log(map.keys, weakMap.keys);
