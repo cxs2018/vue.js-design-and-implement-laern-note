@@ -2,10 +2,10 @@
  * @Description:
  * @Author: cuixuesen
  * @Date: 2022-06-05 20:59:07
- * @LastEditTime: 2022-06-12 20:52:31
+ * @LastEditTime: 2022-06-19 23:16:20
  * @LastEditors: your name
  */
-console.log("5.1=============index");
+console.log("5.3=============index");
 
 // 存储副作用函数的桶
 const bucket = new WeakMap();
@@ -90,7 +90,7 @@ function track(target, key) {
 }
 
 // 在set拦截函数内调用trigger函数触发变化
-function trigger(target, key) {
+function trigger(target, key, type) {
   // 根据target从桶中取得depsMap，它是key-->effects
   const depsMap = bucket.get(target);
   if (!depsMap) return;
@@ -107,6 +107,18 @@ function trigger(target, key) {
         effectsToRun.add(effectFn);
       }
     });
+  // 只有当操作类型为'ADD' 或 'DELETE' 时
+  if (type === "ADD" || type === "DELETE") {
+    // 取得与ITERATE_KEY相关联的副作用函数
+    const iterateEffects = depsMap.get(ITERATE_KEY);
+    // 将与ITERATE_KEY相关联的副作用函数也添加到effectsToRun
+    iterateEffects &&
+      iterateEffects.forEach((effectFn) => {
+        if (effectFn !== activeEffect) {
+          effectsToRun.add(effectFn);
+        }
+      });
+  }
   // 执行副作用函数
   effectsToRun.forEach((effectFn) => {
     // 如果一个副作用函数存在调度器，则调用该调度器，并将副作用函数作为参数传递
@@ -293,3 +305,42 @@ effect(() => {
 });
 
 "foo" in p53;
+
+// 拦截for...in循环
+console.log("拦截for...in循环===================");
+
+const obj1 = { foo: 1 };
+const ITERATE_KEY = Symbol();
+
+const p1 = new Proxy(obj, {
+  ownKeys(target) {
+    // 将副作用函数与ITERTE_KEY关联
+    track(target, ITERATE_KEY);
+    return Reflect.ownKeys(target);
+  },
+  // 拦截设置操作
+  set(target, key, newVal, receiver) {
+    const type = Object.prototype.hasOwnProperty.call(target, key)
+      ? "SET"
+      : "ADD";
+    // 设置属性值
+    const res = Reflect.set(target, key, newVal, receiver);
+    // 把副作用函数从桶里取出并执行
+    trigger(target, key, type);
+    return res;
+  },
+  deleteProperty(target, key) {
+    // 检查被操作的属性是否是对象自己的属性
+    const hadKey = Object.prototype.hasOwnProperty.call(target, key);
+    // 使用Reflect.deleteProperty完成属性的删除
+    const res = Reflect.deleteProperty(target, key);
+
+    if (res && hadKey) {
+      // 只有当被删除的属性是对象自己的属性并且成功删除时，才触发更新
+      trigger(target, key, "DELETE");
+    }
+    return res;
+  },
+});
+
+delete p1.foo;
