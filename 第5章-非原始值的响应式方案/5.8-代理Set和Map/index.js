@@ -2,10 +2,10 @@
  * @Description:
  * @Author: cuixuesen
  * @Date: 2022-06-05 20:59:07
- * @LastEditTime: 2022-06-23 22:48:39
+ * @LastEditTime: 2022-06-23 23:04:34
  * @LastEditors: your name
  */
-console.log("5.7=============index");
+console.log("5.8=============index");
 
 // 存储副作用函数的桶
 const bucket = new WeakMap();
@@ -480,7 +480,7 @@ function reactive(obj) {
   if (existionProxy) return existionProxy;
 
   // 否则，创建新的代理对象
-  const proxy = createReactive(obj);
+  const proxy = createReactive58(obj);
   // 存储到Map中，从而帮忙重复创建
   reactiveMap.set(obj, proxy);
   return proxy;
@@ -566,3 +566,38 @@ arrIterator[Symbol.iterator] = function () {
     },
   };
 };
+
+console.log("5.8start ===================");
+
+const s = new Set([1, 2, 3]);
+const p581 = new Proxy(s, {
+  get(target, key, receiver) {
+    if (key === "size") {
+      // 如果读取的是size属性
+      // 通过指定第三个参数receiver为原始对象target从而修复问题
+      return Reflect.get(target, key, target);
+    }
+    // 将方法与原始数据对象target绑定后返回
+    return target[key].bind(target);
+  },
+});
+
+console.log(p581.delete(1));
+
+// 在creteReactive58里封装用于代理Set/Map类型数据的逻辑
+function createReactive58(obj, isShadow = false, isReadonly = false) {
+  return new Proxy(obj, {
+    get(target, key, receiver) {
+      if (key === "size") {
+        // 如果读取的是size属性
+        // 通过指定第三个参数receiver为原始对象target从而修复问题
+        return Reflect.get(target, key, target);
+      }
+      // 将方法与原始数据对象target绑定后返回
+      return target[key].bind(target);
+    },
+  });
+}
+
+const p58 = reactive(new Set([1, 2, 3, 4]));
+console.log(p58.size);
