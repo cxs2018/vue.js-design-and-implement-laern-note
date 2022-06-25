@@ -2,7 +2,7 @@
  * @Description:
  * @Author: cuixuesen
  * @Date: 2022-06-05 20:59:07
- * @LastEditTime: 2022-06-23 23:04:34
+ * @LastEditTime: 2022-06-25 11:03:46
  * @LastEditors: your name
  */
 console.log("5.8=============index");
@@ -108,18 +108,43 @@ function trigger(target, key, type, newVal) {
         effectsToRun.add(effectFn);
       }
     });
-  // // 只有当操作类型为'ADD' 或 'DELETE' 时
-  // if (type === "ADD" || type === "DELETE") {
-  //   // 取得与ITERATE_KEY相关联的副作用函数
-  //   const iterateEffects = depsMap.get(ITERATE_KEY);
-  //   // 将与ITERATE_KEY相关联的副作用函数也添加到effectsToRun
-  //   iterateEffects &&
-  //     iterateEffects.forEach((effectFn) => {
-  //       if (effectFn !== activeEffect) {
-  //         effectsToRun.add(effectFn);
-  //       }
-  //     });
-  // }
+
+  // 只有当操作类型为'ADD' 或 'DELETE' 时
+  if (
+    type === "ADD" ||
+    type === "DELETE" ||
+    // 如果操作类型是SET，并且目标对象是Map类型的数据
+    // 也应该触发那些与ITERATE_KEY相关联的副作用函数重新执行
+    (type === "SET" &&
+      Object.prototype.toString.call(target) === "[object Map]")
+  ) {
+    // 取得与ITERATE_KEY相关联的副作用函数
+    const iterateEffects = depsMap.get(ITERATE_KEY);
+    // 将与ITERATE_KEY相关联的副作用函数也添加到effectsToRun
+    iterateEffects &&
+      iterateEffects.forEach((effectFn) => {
+        if (effectFn !== activeEffect) {
+          effectsToRun.add(effectFn);
+        }
+      });
+  }
+
+  // 当操作类型为'ADD' 或 'DELETE' 时
+  if (
+    (type === "ADD" || type === "DELETE") &&
+    // 并且目标对象是Map类型的数据
+    Object.prototype.toString.call(target) === "[object Map]"
+  ) {
+    // 取得与MAP_KEY_ITERATE_KEY相关联的副作用函数
+    const iterateEffects = depsMap.get(MAP_KEY_ITERATE_KEY);
+    // 将与MAP_KEY_ITERATE_KEY相关联的副作用函数也添加到effectsToRun
+    iterateEffects &&
+      iterateEffects.forEach((effectFn) => {
+        if (effectFn !== activeEffect) {
+          effectsToRun.add(effectFn);
+        }
+      });
+  }
 
   // 当操作类型为ADD并且目标对象是数组时，应该取出并执行那些与length属性相关联的副作用函数
   if (type === "ADD" && Array.isArray(target)) {
@@ -584,20 +609,216 @@ const p581 = new Proxy(s, {
 
 console.log(p581.delete(1));
 
+// 抽离为独立的函数，便于复用
+function iterationMethod() {
+  // 获取原始数据对象target
+  const target = this.raw;
+  // 获取原始迭代器方法
+  const itr = target[Symbol.iterator]();
+
+  const wrap = (val) =>
+    typeof val === "object" && val !== null ? reactive(val) : val;
+
+  // 调用track函数建立响应联系
+  track(target, ITERATE_KEY);
+
+  // 返回自定义的迭代器
+  return {
+    next() {
+      // 调用原始迭代器的next方法获取value和key
+      const { value, done } = itr.next();
+      return {
+        // 如果value不是undefined，则对其进行包裹
+        value: value ? [wrap(value[0]), wrap(value[1])] : value,
+        done,
+      };
+    },
+    // 实现可迭代协议
+    [Symbol.iterator]() {
+      return this;
+    },
+  };
+}
+
+// 抽离为独立的函数，便于复用
+function valuesIterationMethod() {
+  // 获取原始数据对象target
+  const target = this.raw;
+  // 通过target.values获取原始迭代器方法
+  const itr = target.values();
+
+  const wrap = (val) =>
+    typeof val === "object" && val !== null ? reactive(val) : val;
+
+  // 调用track函数建立响应联系
+  track(target, ITERATE_KEY);
+
+  // 返回自定义的迭代器
+  return {
+    next() {
+      // 调用原始迭代器的next方法获取value和key
+      const { value, done } = itr.next();
+      return {
+        // value是值，而非键值对，所以只需要包裹value即可
+        value: wrap(value),
+        done,
+      };
+    },
+    // 实现可迭代协议
+    [Symbol.iterator]() {
+      return this;
+    },
+  };
+}
+
+const MAP_KEY_ITERATE_KEY = Symbol();
+
+// 抽离为独立的函数，便于复用
+function keysIterationMethod() {
+  // 获取原始数据对象target
+  const target = this.raw;
+  // 通过target.keys获取原始迭代器方法
+  const itr = target.keys();
+
+  const wrap = (val) =>
+    typeof val === "object" && val !== null ? reactive(val) : val;
+
+  // 调用track函数跟踪依赖，在副作用函数与Map_KEY_ITERATE_KEY之间建立响应联系
+  track(target, MAP_KEY_ITERATE_KEY);
+
+  // 返回自定义的迭代器
+  return {
+    next() {
+      // 调用原始迭代器的next方法获取value和key
+      const { value, done } = itr.next();
+      return {
+        // value是值，而非键值对，所以只需要包裹value即可
+        value: wrap(value),
+        done,
+      };
+    },
+    // 实现可迭代协议
+    [Symbol.iterator]() {
+      return this;
+    },
+  };
+}
+
+// 定义一个对象，将自定义的add方法定义到该对象下
+const mutableInstrumentations = {
+  add(key) {
+    // this仍然指向的是代理对象，通过raw属性获取原始数据对象
+    const target = this.raw;
+    const hadKey = target.has(key);
+    // 只要在值不存在的情况下，才需要触发响应
+    if (!hadKey) {
+      // 通过原始数据对象执行add方法删除具体的值
+      // 注意，这里不再需要.bind了，因为是直接通过target调用并执行的
+      const res = target.add(key);
+      // 调用trigger函数触发响应，并指定操作类型为ADD
+      trigger(target, key, "ADD");
+      // 返回操作结果
+      return res;
+    }
+  },
+  delete(key) {
+    const target = this.raw;
+    const hadKey = target.has(key);
+    const res = target.delete(key);
+    // 当要删除的元素确认存在时，才触发响应
+    if (hadKey) {
+      trigger(target, key, "DELETE");
+    }
+    return res;
+  },
+  get(key) {
+    // 获取原始对象
+    const target = this.raw;
+    // 判断读取的key是否存在
+    const had = target.has(key);
+    // 追踪依赖，建立响应联系
+    track(target, key);
+    // 如果存在，则返回结果，这里需要注意的是，如果得到的结果res仍然是可代理的数据，
+    // 则要返回使用reactive包装后的响应式数据
+    if (had) {
+      const res = target.get(key);
+      return typeof res === "object" ? reactive(res) : res;
+    }
+  },
+  set(key, value) {
+    const target = this.raw;
+    const had = target.has(key);
+    // 获取旧值
+    const oldValue = target.get(key);
+    // 设置新值
+    target.set(key, value);
+
+    // 获取原始数据，由于value本身可能已是原始数据，所以此时value.raw不存在，则直接使用value
+    const rawValue = value.raw || value;
+    target.set(key, rawValue);
+    if (!had) {
+      // 如果不存在，则说明是ADD类型的操作，意味着新增
+      trigger(target, key, "ADD");
+    } else if (
+      oldValue !== value ||
+      (oldValue === oldValue && value === value)
+    ) {
+      // 如果存在，并且值变了，则是SET类型的操作，意味着修改
+      trigger(target, key, "SET");
+    }
+  },
+  forEach(callback, thisArg) {
+    // wrap函数用来把可代理的值转换为响应式数据
+    const wrap = (val) => (typeof val === "object" ? reactive(val) : val);
+    // 取到原始数据对象
+    const target = this.raw;
+    // 与ITERATE_KEY建立响应联系
+    track(target, ITERATE_KEY);
+    // 通过原始数据对象调用forEach方法，并把callback传递过去
+    target.forEach((v, k) => {
+      // 手动调用callback，用wrap函数包裹value和key后再传给callback，这样就实现了深响应
+      // 通过.call调用callback，并传递thisArg
+      callback.call(thisArg, wrap(v), wrap(k), this);
+    });
+  },
+  // 共用iterationMethod方法
+  [Symbol.iterator]: iterationMethod,
+  entries: iterationMethod,
+  values: valuesIterationMethod,
+  keys: keysIterationMethod,
+};
+
 // 在creteReactive58里封装用于代理Set/Map类型数据的逻辑
 function createReactive58(obj, isShadow = false, isReadonly = false) {
   return new Proxy(obj, {
     get(target, key, receiver) {
+      // 如果读取的是raw属性，则返回原始数据对象target
+      if (key === "raw") return target;
       if (key === "size") {
         // 如果读取的是size属性
+        // 调用track函数建立响应联系
+        track(target, ITERATE_KEY);
         // 通过指定第三个参数receiver为原始对象target从而修复问题
         return Reflect.get(target, key, target);
       }
-      // 将方法与原始数据对象target绑定后返回
-      return target[key].bind(target);
+      // 返回定义在mutableInstrumentations对象下的方法
+      return mutableInstrumentations[key];
     },
   });
 }
 
-const p58 = reactive(new Set([1, 2, 3, 4]));
-console.log(p58.size);
+const p58 = reactive(
+  new Map([
+    ["key1", "value1"],
+    ["key2", "value2"],
+  ])
+);
+
+effect(() => {
+  for (const value of p58.keys()) {
+    console.log(value);
+  }
+});
+
+p58.set("key2", "value3");
+p58.set("key3", "value3");
